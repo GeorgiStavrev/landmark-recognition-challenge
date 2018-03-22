@@ -16,7 +16,7 @@ def download_batch(df):
             errors.append(row['id'])
 
         if (index + 1)%10000 == 0:
-            print('Processed {0} images so far.'.format(index))')
+            print('Processed {0} images so far.'.format(index))
     
     for i in len(errors):
         row = df.loc[df['id'] == errors[i]]
