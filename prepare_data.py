@@ -8,9 +8,9 @@ from multiprocessing.dummy import Pool as ThreadPool
 import sys
 
 def download_batch_with_args(args):
-    i, df, tag = args
+    i, df, tag, img_side = args
     print('Starting Thread[{0}]'.format(i))
-    download_batch(i, df, tag)
+    download_batch(i, df, tag, img_side)
 
 def get_checkpoint_filepath(thread_id, tag):
     filename = 'thread_' + tag + '_' + str(thread_id) + '.save'
@@ -30,7 +30,7 @@ def read_checkpoint(thread_id, tag):
         return False, ''
 
 
-def download_batch(thread_id, df, tag):
+def download_batch(thread_id, df, tag, img_side):
     checkpoint_found, last_row_id = read_checkpoint(thread_id, tag)
 
     if checkpoint_found:
@@ -43,8 +43,8 @@ def download_batch(thread_id, df, tag):
     for index, row in df.iterrows():
         url = row['url']
         img_id = row['id']
-        if not download_resized_file(img_id, url):
-            if not download_file(img_id, url):
+        if not download_resized_file(img_id, url, img_side):
+            if not download_file(img_id, url, img_side):
                 errors.append(img_id)
 
         if (index + 1)%100 == 0:
@@ -65,19 +65,19 @@ def create_dir_if_not_exists(dirname):
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-def download_resized_file(img_id, url):
+def download_resized_file(img_id, url, img_side):
     sizes = ['/s1600/','/w500/', '/s150-c/', '/s0-d/', '/d/', '/s0/']
     result = False
     for i in range(len(sizes)):
         if sizes[i] in url:
-            new_url = url.replace(sizes[i], '/s' + str(224) + '/')
-            if download_file(img_id, new_url):
+            new_url = url.replace(sizes[i], '/s' + str(img_side) + '/')
+            if download_file(img_id, new_url, img_side):
                 result = True
                 break
     
     return result
 
-def download_file(id, url):
+def download_file(id, url, img_side):
     result = True
     if not file_exists_for_id(id):
         try:
@@ -85,8 +85,7 @@ def download_file(id, url):
             if r.status_code == 200:
                 img = Image.open(BytesIO(r.content))
                 filepath = os.path.join(os.getcwd(), 'data', 'temp', id + '.' + img.format)
-
-                img.thumbnail((224,224))
+                img.thumbnail((img_side, img_side))
                 img.save(filepath)
         except OSError:
             print('Something went wrong while trying to identify image with id:{0} and url:{1}'.format(id, url))
@@ -108,13 +107,13 @@ def file_exists_for_id(id):
     return res
 
 # HERE IT COMES
-def download_test_data(parallel_threads_count):
-    download_data('test', parallel_threads_count)
+def download_test_data(parallel_threads_count, img_side):
+    download_data('test', parallel_threads_count, img_side)
 
-def download_train_data(parallel_threads_count):
-    download_data('train', parallel_threads_count)
+def download_train_data(parallel_threads_count, img_side):
+    download_data('train', parallel_threads_count, img_side)
 
-def download_data(name, parallel_threads_count):
+def download_data(name, parallel_threads_count, img_side):
     print('Loading ' + name + '.csv ...')
     data_path = os.path.join(os.getcwd(), 'data', name + '.csv')
     train_df = pd.read_csv(data_path)
@@ -129,7 +128,9 @@ def download_data(name, parallel_threads_count):
         from_idx = int(i * batch_size)
         to_idx = int((i+1) * batch_size)
         print('Add batch from {0} to {1}'.format(from_idx, to_idx))
-        download_batch_args.append((i, train_df.iloc[from_idx:to_idx,:], name + '_' + str(threads_count)))
+
+        thread_args = (i, train_df.iloc[from_idx:to_idx,:], name + '_' + str(threads_count), img_side)
+        download_batch_args.append(thread_args)
 
     pool = ThreadPool(threads_count)
     pool.map(download_batch_with_args, download_batch_args)
@@ -139,19 +140,27 @@ def download_data(name, parallel_threads_count):
     print('Download ' + name + ' END')
 
 if __name__ == '__main__':
-    args = sys.argv
     parallel_threads_count = 10
     args_count = len(sys.argv)
+    task = ''
+    img_side = 224
+
+    if args_count > 1:
+        task = sys.argv[1]
 
     if args_count > 2:
         parallel_threads_count = int(sys.argv[2])
 
-    if args_count == 1 or sys.argv[1] == 'test':
+    if args_count > 3:
+        img_side = int(sys.argv[3])
+
+
+    if args_count == 1 or task == 'test':
         create_dir_if_not_exists('temp')
-        download_test_data(parallel_threads_count)
+        download_test_data(parallel_threads_count, img_side)
         os.rename(os.path.join(os.getcwd(), 'data', 'temp'), os.path.join(os.getcwd(), 'data', 'test'))
 
-    if args_count == 1 or sys.argv[1] == 'train':
+    if args_count == 1 or task == 'train':
         create_dir_if_not_exists('temp')
-        download_train_data(parallel_threads_count)
+        download_train_data(parallel_threads_count, img_side)
         os.rename(os.path.join(os.getcwd(), 'data', 'temp'), os.path.join(os.getcwd(), 'data', 'train'))
