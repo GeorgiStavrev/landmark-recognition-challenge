@@ -6,19 +6,51 @@ from io import BytesIO
 import glob
 from multiprocessing.dummy import Pool as ThreadPool
 import sys
-#from urllib import request, error
 
-def download_batch(df):
+def download_batch_with_args(args):
+    i, df, tag = args
+    print('Starting Thread[{0}]'.format(i))
+    download_batch(i, df, tag)
+
+def get_checkpoint_filepath(thread_id, tag):
+    filename = 'thread_' + tag + '_' + str(thread_id) + '.save'
+    filepath = os.path.join(os.getcwd(), 'data', filename)
+    return filepath
+
+def write_checkpoint(thread_id, row_id, tag):
+    with open(get_checkpoint_filepath(thread_id, tag), 'w') as text_file:
+        print(str(row_id), file=text_file)
+
+def read_checkpoint(thread_id, tag):
+    filepath = get_checkpoint_filepath(thread_id, tag)
+    if os.path.isfile(filepath):
+        with open(filepath, 'r') as text_file:
+            return True, text_file.read().rstrip()
+    else:
+        return False, ''
+
+
+def download_batch(thread_id, df, tag):
+    checkpoint_found, last_row_id = read_checkpoint(thread_id, tag)
+
+    if checkpoint_found:
+        print('Last row was \'' + last_row_id + '\'')
+        position = df[df['id'] == last_row_id].index[0]
+        print('Resuming thread ' + tag + '[' + str(thread_id) + '] from row', position)
+        df = df.iloc[position:,:]
+
     errors = []
-    i = 0
     for index, row in df.iterrows():
         if not download_file(row['id'], row['url']):
             errors.append(row['id'])
 
+        if (index + 1)%100 == 0:
+            write_checkpoint(thread_id, row['id'], tag)
+
         if (index + 1)%10000 == 0:
             print('Processed {0} images so far.'.format(index))
     
-    for i in len(errors):
+    for i in range(len(errors)):
         row = df.loc[df['id'] == errors[i]]
         print('Test sample with id {0} was not imported. Url: {1}'.format(row['id'], row['url']))
 
@@ -34,8 +66,6 @@ def download_file(id, url):
     result = True
     if not file_exists_for_id(id):
         try:
-            #response = request.urlopen(url)
-            #image_data = response.read()
             r = requests.get(url, allow_redirects=True)
             if r.status_code == 200:
                 img = Image.open(BytesIO(r.content))
@@ -79,15 +109,15 @@ def download_data(name, parallel_threads_count):
 
     threads_count = parallel_threads_count
     batch_size = train_df.shape[0] / threads_count
-    batches = []
+    download_batch_args = []
     for i in range(threads_count):
         from_idx = int(i * batch_size)
         to_idx = int((i+1) * batch_size)
         print('Add batch from {0} to {1}'.format(from_idx, to_idx))
-        batches.append(train_df.iloc[from_idx:to_idx,:])
+        download_batch_args.append((i, train_df.iloc[from_idx:to_idx,:], name))
 
     pool = ThreadPool(threads_count)
-    pool.map(download_batch, batches)
+    pool.map(download_batch_with_args, download_batch_args)
     pool.close()
     pool.join()
 
