@@ -41,11 +41,14 @@ def download_batch(thread_id, df, tag):
 
     errors = []
     for index, row in df.iterrows():
-        if not download_file(row['id'], row['url']):
-            errors.append(row['id'])
+        url = row['url']
+        img_id = row['id']
+        if not download_resized_file(img_id, url):
+            if not download_file(img_id, url):
+                errors.append(img_id)
 
         if (index + 1)%100 == 0:
-            write_checkpoint(thread_id, row['id'], tag)
+            write_checkpoint(thread_id, img_id, tag)
 
         if (index + 1)%10000 == 0:
             print('Processed {0} images so far.'.format(index))
@@ -61,6 +64,18 @@ def create_dir_if_not_exists(dirname):
     directory = os.path.join(os.getcwd(), 'data', dirname)
     if not os.path.exists(directory):
         os.makedirs(directory)
+
+def download_resized_file(img_id, url):
+    sizes = ['/s1600/','/w500/', '/s150-c/', '/s0-d/', '/d/', '/s0/']
+    result = False
+    for i in range(len(sizes)):
+        if sizes[i] in url:
+            new_url = url.replace(sizes[i], '/s' + str(224) + '/')
+            if download_file(img_id, new_url):
+                result = True
+                break
+    
+    return result
 
 def download_file(id, url):
     result = True
@@ -114,7 +129,7 @@ def download_data(name, parallel_threads_count):
         from_idx = int(i * batch_size)
         to_idx = int((i+1) * batch_size)
         print('Add batch from {0} to {1}'.format(from_idx, to_idx))
-        download_batch_args.append((i, train_df.iloc[from_idx:to_idx,:], name))
+        download_batch_args.append((i, train_df.iloc[from_idx:to_idx,:], name + '_' + str(threads_count)))
 
     pool = ThreadPool(threads_count)
     pool.map(download_batch_with_args, download_batch_args)
